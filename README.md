@@ -1,2 +1,2 @@
-# CompNum
-Dépôt du rapport de recherche en science des données sur la compétence numérique
+# esMauricie
+Dépôt du rapport de recherche en science des données sur l'état de l'économie sociale en Mauricie
