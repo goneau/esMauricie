@@ -1,0 +1,36 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  favicon: images/pastille.png
+
+
+  navbar:
+    logo: images/ESM_Couleur_RENV_Filet.png
+    left:
+      - text: "Présentation"
+        href: index.qmd
+      - text: "Données du Pôle"
+        href: pole.qmd
+      - text: "Données du REQ"
+        href: req.qmd
+      - text: "Références"
+        href: references.qmd
+    right:
+      - icon: github
+        href: https://github.com/goneau/esMauricie
+        aria-label: GitHub
+
+  page-footer:
+    center: "© 2025 Martin Goneau — Pôle d'ÉS Mauricie"
+
+format:
+  html:
+    theme: Flatly
+    css: styles.css
+    toc: true
+    lang: fr-CA
+
+  
+bibliography: ../references.bib

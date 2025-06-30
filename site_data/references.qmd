@@ -1,0 +1,8 @@
+---
+title: "Références bibliographiques"
+bibliography: ../references.bib
+nocite: "@*"
+---
+
+::: {#refs}
+:::

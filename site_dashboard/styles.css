@@ -1,0 +1,6 @@
+.quarto-dashboard #quarto-dashboard-header .navbar .navbar-logo {
+  max-height: 84px;
+}
+thead, tbody, tfoot, tr, td, th {
+    font-size: small;
+}

@@ -1,0 +1,23 @@
+---
+title: "Importation et traitement des données"
+toc: false
+---
+
+```{r, echo=FALSE, output=FALSE}
+library(tidyverse)
+library(readr)
+```
+
+## Présentation
+
+Ce site présente la méthodologie de traitement des données du tableau de bord [*Portrait des entreprises
+d’ÉS de la Mauricie*](https://goneau.com/és-carto) développé pour le **[Pôle d’économie sociale de la Mauricie](https://economiesocialemauricie.ca)**.
+
+L’objectif est de **documenter les étapes de nettoyage, de structuration et de géocodage** des données provenant :
+
+- de la liste des membres du Pôle;
+- du répertoire des entreprises d'ÉS du Pôle;
+- du Registre des entreprises du Québec 
+[@registredesentreprisesRegistreEntreprisesDonnees2025],
+
+Ces opérations visent à **assurer la reproductibilité et la traçabilité** des données utilisées pour le projet de cartographie. Le site propose des pages distinctes pour chaque source de données avec le code utilisé et commenté pour le filtrage et l'organisation des données, ainsi que les outils utilisés.

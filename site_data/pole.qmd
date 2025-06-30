@@ -1,0 +1,229 @@
+---
+title: "Les données du Pôle de l'économie sociale"
+---
+
+```{r, echo=FALSE, output=FALSE}
+library(tidyverse)
+library(stringi)
+library(readr)
+```
+
+Les données fournies par le Pôle ont été analysées dans un premier temps à l’aide d’[OpenRefine](https://openrefine.org) pour bien intégrer leurs structures, évaluer le niveau de qualité et effectuer un premier nettoyage manuel avec l’objectif d’uniformiser le nom des variables et supprimer les données superflues pour le projet de cartographie.
+
+Cette première étape a aussi permis d’anonymiser les données pour garantir que seules les informations publiques sont retenues.
+
+## Importation des données
+
+Chargement des données du Pôle d'économie sociale de la Mauricie, qui comprend la liste des membres et le répertoire des entreprises d'ÉS.
+
+```{r, output=FALSE}
+# Chemin d'accès pour les données du Pôle
+pole_path <- "../data/Pôle"
+
+# Chargement des données
+# Liste des membres du Pôle
+Membres <- read_csv(file.path(pole_path, "MembresPôle.csv"))
+
+# Répertoire des entreprises d'ÉS du Pôle
+Rep_Entreprises <- read_csv(file.path(pole_path, "RépertoireEntreprises_ÉS.csv"))
+```
+
+Importation des données du @registredesentreprisesRegistreEntreprisesDonnees2025 pour récupérer les numéro d'entreprises du Québec (NEQ).
+
+```{r, output=FALSE}
+# Chemin d'accès pour les données du REQ
+req_path <- "../data/REQ"
+
+# Chargement des noms en vigueur du registre d'entreprise du Québec (REQ)
+Nom <- read_csv(file.path(req_path, "Nom.csv")) %>%
+  # Sélection des noms en vigueur seulement
+  filter(STAT_NOM == "V") %>%
+  # Sélection des 2 premières colonnes seulement
+  select(1:2) %>% 
+  drop_na()
+```
+
+### Normalisation des données
+
+#### Fonctions de normalisations 
+
+Considérant la plus grande complexité des données du Pôle, nous avons choisi d’utiliser des fonctions de normalisation pour uniformiser les noms d’entreprises et les adresses. Ces fonctions sont appliquées aux deux dataframes : `Membres` et `Rep_Entreprises`.
+
+```{r}
+# Normalisation des noms d'entreprises
+normaliser_nom <- function(x) {
+  x %>% 
+    stri_trans_general("Latin-ASCII") %>% # retire les accents
+    # Retirer les suffixes d'entreprises
+    gsub("\\b(INC|LTEE|LTD)\\b", "", ., ignore.case = TRUE) %>%  
+    gsub("[[:punct:]]", " ", .) %>%       # retire la ponctuation  
+    gsub("[[:space:]]+", " ", .) %>%      # espaces multiples réduits à un seul
+    trimws() %>%                          # espaces en début et fin
+    toupper()                             # majuscules
+}
+```
+
+```{r}
+# Normalisation des adresses
+normaliser_adresse <- function(x) {
+  vapply(x, function(chaine) {
+    # Nettoyage initial
+    chaine_mod <- chaine %>%
+      gsub("[\r\n]+", " ", ., perl = TRUE) # retire des sauts de ligne
+
+    # Motif pour capturer l'unité et le numéro ("BUR 201", "BUREAU:201", "APP 5", etc.)
+    motif <- "(BUR(EAU)?|APP|LOCAL|SUITE)[\\.:]?\\s*(\\d+)"
+    m <- str_match(chaine_mod, regex(motif, ignore_case = TRUE)) # extraction des groupes de capture
+    numero <- m[, 4] # récupération du numéro d'unité
+    
+    # Retire l'unité + numéro de l'adresse
+    chaine_mod <- str_remove(chaine_mod, regex(motif, ignore_case = TRUE))
+    
+    # S'il y a un numéro, on le positionne devant le numéro civique
+    if (!is.na(numero) && numero != "") {
+      chaine_mod <- str_replace(chaine_mod, "^\\s*([0-9]+)", paste0(numero, "-\\1"))
+    }
+    
+    # Nettoyage complémentaire
+    chaine_mod <- chaine_mod %>%
+      gsub("C\\.?P\\.?\\s*:?\\s*\\d+", "", ., perl = TRUE) %>%   # retire les C.P.
+      gsub(",", "", ., perl = TRUE) %>%                          # retire les virgules
+      gsub("[[:space:]]+", " ", ., perl = TRUE) %>%              # espaces multiples réduits à un seul
+      str_trim()                                                 # espaces en début et fin
+ 
+    # retour de la chaîne normalisée
+    chaine_mod 
+  }, character(1))
+}
+```
+
+#### Application des fonctions de normalisation
+
+Normalisation des noms et adresses dans les dataframes `Membres` et `Rep_Entreprises`, ainsi que la création d'un vecteur de noms normalisés pour la table `Nom` du REQ.
+
+```{r}
+# Normalisez les noms et adresses dans les tables Membres et Rep_Entreprises
+Membres <- Membres %>%
+  mutate(NomNormal = normaliser_nom(NomEntreprise)) %>%
+  mutate(Adresse = normaliser_adresse(Adresse))
+
+Rep_Entreprises <- Rep_Entreprises %>%
+  mutate(NomNormal = normaliser_nom(NomEntreprise)) %>%
+  mutate(Adresse = normaliser_adresse(Adresse))
+
+# Normalisez les noms dans la table Nom du REQ
+Nom <- Nom %>%
+  mutate(NomNormal = normaliser_nom(NOM_ASSUJ)) %>%
+  select(-NOM_ASSUJ)
+```
+
+## Récuprération des numéros d'entreprises du Québec (NEQ)
+
+```{r}
+# Nombre d'entrées dans la table Nom
+paste0("Nombre d'entrées dans la table Nom : ",nrow(Nom))
+```
+
+Considérant la taille de la liste des noms d’entreprises, même après avoir retiré les noms d'entreprises inactifs, en plus de l’éventuelle difficulté à éliminer les faux positifs[^1], nous nous contentons d’une recherche simple en utilisant les noms normalisés.
+
+[^1]: Par exemple, une jointure Jaro-Winkler avec une distance de 0.05 nous permettait de trouver seulement 9 regroupements corrects supplémentaires pour plusieurs minutes de traitement, alors qu'une distance de 0.1 nous donnais plus 200 avec plusieurs doublons.
+
+### Création d'un vecteur des noms recherchés
+
+```{r}
+# Création d'un vecteur de termes à rechercher
+Termes <- union(Membres$NomNormal, Rep_Entreprises$NomNormal)
+
+# Sélection des termes cibles dans la table Nom
+TermesCibles <- Nom %>%
+  filter(NomNormal %in% Termes) %>%
+  distinct(NEQ, .keep_all = TRUE)
+```
+
+### Jointure des NEQ dans les dataframes `Membres` et `Rep_Entreprises`
+
+```{r}
+Membres <- Membres %>%
+  left_join(
+    TermesCibles %>% select(NEQ, NomNormal),
+    by = "NomNormal",
+    multiple = "first" # Nous gardons la première correspondance trouvée
+  )
+
+Rep_Entreprises <- Rep_Entreprises %>%
+  left_join(
+    TermesCibles %>% select(NEQ, NomNormal),
+    by = "NomNormal",
+    multiple = "first" # Nous gardons la première correspondance trouvée
+  )
+```
+
+
+## Concaténation des données
+
+Pour éviter les doublons, nous retirons les membres déjà présents dans le répertoire des entreprises d'ÉS du Pôle avant de concaténer les deux dataframes. Puisque les noms ont été normalisés et que nous n'avons pas de garantie que les NEQ trouvées sont exactes, nous utilisons la colonne `NomNormal` pour effectuer cette opération.
+
+```{r}
+# Retrait des membres présents dans le répertoire des entreprises
+Rep_Entreprises <- Rep_Entreprises %>%
+  anti_join(Membres, by = "NomNormal")
+
+# Concaténation des deux dataframes
+Rep_Entreprises_Membres <- bind_rows(
+  Rep_Entreprises,
+  Membres
+) %>%
+  select(-NomNormal) # retrait de la colonne NomNormal
+```
+
+
+## Géocodage des données
+
+Avant de procéder au géocodage, nous vérifions si les données ont déjà été traitées pour éviter de refaire le travail inutilement. Si le fichier de géocodage existe, on le charge ; sinon, on procède au géocodage.
+
+```{r}
+library(tidygeocoder)
+
+if (file.exists(file.path(pole_path, "Rep_Pôle_Membres_LatLong.csv"))) {
+  message("Données déjà traitées!")
+  Rep_Entreprises_Membres_Geocoded <- read_csv(file.path(pole_path, "Rep_Pôle_Membres_LatLong.csv"))
+} else {
+  message("Données pas encore traitées!")
+  Rep_Entreprises_Membres_Geocoded <- Rep_Entreprises_Membres %>%
+  mutate(AdresseTemp = paste(Adresse, Municipalite, "Québec, Canada", CodePostal, sep = " ")) %>%
+  geocode(
+    address = AdresseTemp,
+    method = "mapbox",
+    lat = "lat",
+    long = "long",
+    limit = 1
+  ) %>%
+    select(-AdresseTemp)
+
+  write.csv(Rep_Entreprises_Membres_Geocoded, file.path(pole_path, "Rep_Pôle_Membres_LatLong.csv"), row.names = FALSE)
+}
+```
+
+
+
+<!-- # ```{r} -->
+<!-- # # Correction de données fautives lors du Géocodage -->
+<!-- #  -->
+<!-- # Rep_Entreprises_Membres_Geocoded <- Rep_Entreprises_Membres_Geocoded %>% -->
+<!-- #   mutate( -->
+<!-- #     lat = ifelse(NomEntreprise == "L'INTERVILLE COOP DE SOLIDARITÉ EN SOINS ET SERVICES", 46.33868184598047, lat), -->
+<!-- #     long = ifelse(NomEntreprise == "L'INTERVILLE COOP DE SOLIDARITÉ EN SOINS ET SERVICES", -72.60804975417247, long) -->
+<!-- #   ) -->
+<!-- # ``` -->
+<!-- #  -->
+<!-- #  -->
+<!-- # ```{r} -->
+<!-- # Rep_Entreprises_Membres_Geocoded <- Rep_Entreprises_Membres_Geocoded %>% -->
+<!-- #   drop_na(lat, long, Adresse) -->
+<!-- # ``` -->
+
+
+```{r}
+# write.csv(Rep_Entreprises_Membres_Geocoded, file.path(pole_path, "Rep_Pôle_Membres_LatLong.csv"), row.names = FALSE)
+```
+

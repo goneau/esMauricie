@@ -1,0 +1,446 @@
+---
+title: "Portrait des entreprises d'ÉS de la Mauricie"
+format:
+  dashboard:
+    
+    title: "Portrait des entreprises<br />d'ÉS de la Mauricie"
+    logo: images/ESM_Couleur_RENV_Filet.png
+    theme: Flatly
+    css: styles.css
+    orientation: rows
+    scrolling: false
+    expandable: true
+    nav-buttons:
+      - icon: github
+        href: https://github.com/goneau/esMauricie
+        aria-label: GitHub
+bibliography: ../references.bib
+
+---
+
+
+```{r, output=FALSE}
+# Chargement des librairies :
+library(sf)
+library(tidyverse)
+library(leaflet)
+library(leaflet.extras)
+```
+
+
+```{r, echo=FALSE, output=FALSE}
+# Chemins des données
+shp_path <- "../data/SHP"
+pole_path <- "../data/Pôle"
+REQ_path <- "../data/REQ"
+
+# Chargement du shapefile
+mrc <- st_read(file.path(shp_path, "mrc_s.shp"))
+mrc_mauricie <- mrc %>% filter(MRS_CO_REG == "04")
+mrc_mauricie <- st_transform(mrc_mauricie, crs = "WGS84")
+
+# Chargement des données du Pôle (liste des membres et répertoire des entreprises d'ÉS)
+Rep_Entreprises_Membres <- read_csv(file.path(pole_path, "Rep_Pôle_Membres_LatLong.csv"))
+
+# Chargement des données du REQ (registre des entreprises du Québec)
+Entreprises_REQ <- read_csv(file.path(REQ_path, "Entreprise_LatLong.csv"))
+```
+
+
+```{r, echo=FALSE, output=FALSE}
+# --- 1. PALLETTES & ICONES ---
+
+# Palette personnalisée pour les polygones MRC
+pal_poly <- colorFactor(
+  palette = c("#F7A415", "#F4D50A", "#B2C94B", "#51B7AE", "#34B3C9", "#41A2DB"),
+  domain  = mrc_mauricie$MRS_NM_MRC
+)
+
+# Palette pour les catégories de membres
+categories <- c("Citoyen COLLECTIF", "Partenaire COLLECTIF", "Membre ÉMERGENCE", "Membre COLLECTIF")
+
+pal_categorie <- colorFactor(
+  palette = c(
+    "Citoyen COLLECTIF"     = "#34B3C9",
+    "Partenaire COLLECTIF"  = "#B2C94B",
+    "Membre ÉMERGENCE"      = "#F7A415",
+    "Membre COLLECTIF"      = "#41A2DB"
+  ),
+  domain = categories,
+  na.color = "black" # Non-membres en noir
+)
+```
+
+
+# Tableau de bord
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+unique(Rep_Entreprises_Membres$CategorieMembre)
+
+sum(Rep_Entreprises_Membres$CategorieMembre == "Membre COLLECTIF")
+sum(Rep_Entreprises_Membres$CategorieMembre == "Membre COLLECTIF", na.rm = TRUE)
+```
+
+
+## Row
+```{r}
+#| content: valuebox
+#| title: "Citoyen COLLECTIF"
+list(
+  icon = "person-fill",
+  color = pal_categorie("Citoyen COLLECTIF"),
+  value = sum(Rep_Entreprises_Membres$CategorieMembre == "Citoyen COLLECTIF", na.rm = TRUE)
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "Partenaire COLLECTIF"
+list(
+  icon = "building-fill",
+  color = pal_categorie("Partenaire COLLECTIF"),
+  value = sum(Rep_Entreprises_Membres$CategorieMembre == "Partenaire COLLECTIF", na.rm = TRUE)
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "Membre ÉMERGENCE"
+list(
+  icon = "brightness-alt-high-fill",
+  color = pal_categorie("Membre ÉMERGENCE"),
+  value = sum(Rep_Entreprises_Membres$CategorieMembre == "Membre ÉMERGENCE", na.rm = TRUE)
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "Membre COLLECTIF"
+list(
+  icon = "people-fill",
+  color = pal_categorie("Membre COLLECTIF"),
+  value = sum(Rep_Entreprises_Membres$CategorieMembre == "Membre COLLECTIF", na.rm = TRUE)
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "Membres totaux"
+list(
+  icon = "person-vcard-fill",
+  value = paste0(
+    sum(!is.na(Rep_Entreprises_Membres$CategorieMembre)),
+    " sur ",
+    nrow(Rep_Entreprises_Membres)
+  ),
+  p = "Sur le nombre d'entreprises répertoriées"
+)
+```
+
+## Row 
+
+```{r}
+# Fonctions de création d'icônes personalisés pour les membres, le répertoire et le REQ
+svg_circle <- function(color_hex = "black", stroke = "black", sw = 2, size = 18) {
+  svg_raw <- sprintf(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
+    <circle cx="%d" cy="%d" r="%d" fill="%s" stroke="%s" stroke-width="%d"/>
+    </svg>',
+    size, size, size, size, size/2, size/2, (size/2)-2, color_hex, stroke, sw
+  )
+}
+
+svg_triangle <- function(color_hex = "black", stroke = "black", sw = 2, size = 18) {
+  pts <- sprintf("%d,2 %d,%d 2,%d", size/2, size-2, size-2, size-2)
+  sprintf(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
+    <polygon points="%s" fill="%s" stroke="%s" stroke-width="%d"/>
+    </svg>',
+    size, size, size, size, pts, color_hex, stroke, sw
+  )
+}
+
+svg_square <- function(color_hex = "black", stroke = "black", sw = 2, size = 18) {
+  sprintf(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
+    <rect x="2" y="2" width="%d" height="%d" fill="%s" stroke="%s" stroke-width="%d"/>
+    </svg>',
+    size, size, size, size, size-4, size-4, color_hex, stroke, sw
+  )
+}
+```
+
+
+
+```{r}
+# Chargement des tuiles et des polygones de la Mauricie
+# Objet leaflet en étapes
+ma_carte <- leaflet(options = leafletOptions(preferCanvas = TRUE)) %>%
+  # Fond de carte
+  addProviderTiles("Esri.WorldGrayCanvas", group = "Fond de carte") %>%
+# Polygones des MRC
+addPolygons(
+  data = mrc_mauricie,
+  fillColor = ~pal_poly(MRS_NM_MRC),
+  color = "white", weight = 1.5, fillOpacity = 0.6,
+  group = "Municipalités et MRC",
+  highlightOptions = highlightOptions(weight = 3, color = "white", fillOpacity = 0.8)
+)
+```
+
+
+```{r}
+# Marqueurs pour les entreprises du répertoire (Pôle - triangle noir)
+# Définition de la taille des icônes
+icon_size <- 16
+
+# Création des marqueurs triangulaires
+triangle_icon <- makeIcon(
+  iconUrl = paste0("data:image/svg+xml;utf8,", URLencode(svg_triangle("black", "white", 1, icon_size)
+    )),
+    iconWidth = icon_size,
+    iconHeight = icon_size
+)
+
+# Création des marqueurs pour les entreprises du Pôle
+ma_carte <- ma_carte %>%
+  addMarkers(
+    data = Rep_Entreprises_Membres %>% filter(is.na(CategorieMembre)),
+    lng = ~long, lat = ~lat,
+    icon = triangle_icon,
+    group = "Non-membre",
+    label = ~NomEntreprise,
+    labelOptions = labelOptions(direction = "top"),
+    popup = ~paste0(
+      "<b>", NomEntreprise, "</b><br>",
+      "<b>Catégorie :</b> Non-membre<br>",
+      ifelse(is.na(NEQ) | NEQ == "",
+        "<b>NEQ :</b> non disponible <br />",
+        paste0('<b>NEQ :</b> ', NEQ, "<br />")),
+      Adresse, "<br>",
+      Municipalite, "<br>",
+      ifelse(is.na(SiteWeb) | SiteWeb == "",
+        "Site web non disponible",
+        paste0('<a href=http://', SiteWeb, ' target="_blank">', SiteWeb, '</a>'))
+    )
+  )
+```
+
+```{r, output=FALSE}
+names(Rep_Entreprises_Membres)
+```
+
+
+```{r}
+# Marqueurs pour les entreprise du REQ (carré noir)
+
+# --- Nettoyage des données ---
+
+# NOTE : Puisqu'un certain nombre d'entreprises du REQ sont aussi membres du Pôle, on ne les affiche pas deux fois.
+# Filtrage des entreprises du REQ quisont membres du Pôle
+Entreprises_REQ <- Entreprises_REQ %>%
+  filter(!(NEQ %in% Rep_Entreprises_Membres$NEQ))
+
+# De plus, certaines entreprises du REQ n'ont pas correctement été géocodées, on les filtre aussi :
+# Conversion des entreprises REQ en objets sf
+Entreprises_REQ <- Entreprises_REQ %>%
+  filter(!is.na(long), !is.na(lat)) %>%
+  st_as_sf(coords = c("long", "lat"), crs = 4326, remove = FALSE)
+
+# Création d'un objet sf de la Mauricie pour filtrer les entreprises du REQ
+zone_mauricie <- st_union(mrc_mauricie)
+# Filtrage des entreprises du REQ qui sont dans la Mauricie
+Entreprises_REQ <- Entreprises_REQ[st_within(Entreprises_REQ, zone_mauricie, sparse = FALSE)[,1], ]
+
+# --- Création des marqueurs ---
+
+# Définition de la taille des icônes
+icon_size <- 12
+
+# Création des marqueurs carrés
+square_icon <- makeIcon(
+  iconUrl = paste0("data:image/svg+xml;utf8,", URLencode(svg_square("white", "black", 1, icon_size)
+    )),
+    iconWidth = icon_size -2,
+    iconHeight = icon_size -2
+)
+
+# Création des marqueurs pour les entreprises du REQ
+ma_carte <- ma_carte %>%
+  addMarkers(
+    data = Entreprises_REQ, # ou autre champ pour les carrés
+    lng = ~long, lat = ~lat,
+    icon = square_icon,
+    group = "Non-membre (REQ)",
+    labelOptions = labelOptions(direction = "top"),
+    label = ~NomEntreprise,
+    popup = ~paste0(
+        "<b>", NomEntreprise, "</b><br>",
+        ifelse(is.na(NEQ) | NEQ == "",
+          "<b>NEQ :</b> non disponible <br />",
+          paste0('<b>NEQ :</b> ', NEQ, "<br />")),
+        "<b>Secteur d'activité : </b>", SecteurActivite,"<br>",
+        "<b>Forme juridique : </b>", FormeJuridique,"<br>",
+        Adresse, "<br>",
+        ifelse(is.na(Adresse_Lign3) | Adresse_Lign3 == "",
+          "",
+          paste0(Adresse_Lign3, "<br />")),
+        Municipalite, "<br>"
+    ),
+    clusterOptions = markerClusterOptions()
+  )
+
+```
+
+
+```{r}
+# Marqueurs pour les membres du Pôle (cercles colorés)
+# Définition de la taille des icônes
+icon_size <- 16
+
+# Création des marqueurs (svg) et des marqueurs des membres selon la couleur
+for(cat in categories){
+  color_cat <- pal_categorie(cat)
+  svg_code <- svg_circle(color_hex = color_cat, stroke = "black", sw = 1, size = icon_size)
+  svg_url  <- paste0("data:image/svg+xml;utf8,", URLencode(svg_code, reserved = TRUE))
+  svg_icon <- makeIcon(
+    iconUrl = svg_url,
+    iconWidth = icon_size,
+    iconHeight = icon_size
+  )
+  ma_carte <- ma_carte %>%
+    addMarkers(
+      data = Rep_Entreprises_Membres %>% filter(CategorieMembre == cat),
+      lng = ~long, lat = ~lat,
+      icon = svg_icon,
+      group = cat,
+      label = ~NomEntreprise,
+      labelOptions = labelOptions(direction = "top"),
+      popup = ~paste0(
+        "<b>", NomEntreprise, "</b><br>",
+        "<b>Catégorie :</b> ", CategorieMembre, "<br>",
+        ifelse(is.na(Type) | Type == "",
+          "<b>Type :</b> non disponible <br />",
+          paste0("<b>Type :</b> ", Type, "<br />")),
+        ifelse(is.na(NEQ) | NEQ == "",
+          "<b>NEQ :</b> non disponible <br />",
+          paste0('<b>NEQ :</b> ', NEQ, "<br />")),
+        Adresse, "<br>",
+        Municipalite, "<br>",
+        ifelse(is.na(SiteWeb) | SiteWeb == "",
+          "Site web non disponible",
+          paste0('<a href=http://', SiteWeb, ' target="_blank">', SiteWeb, '</a>'))
+      )
+    )
+}
+```
+
+```{r}
+# Création d'un heatmap pour les entreprises du REQ
+
+# Filtrage des entreprises du REQ qui ont des coordonnées géographiques
+# Attribution d'un poids selon la forme juridique
+Heat_REQ <- Entreprises_REQ %>%
+  filter(!is.na(long) & !is.na(lat)) %>%
+  mutate(
+    Poids = case_when(
+      str_detect(FormeJuridique, "APE") ~ 1L,
+      str_detect(FormeJuridique, "ASS") ~ 2L,
+      str_detect(FormeJuridique, "COP") ~ 5L,
+      TRUE ~ 0L)
+  )
+
+# Création de la heatmap
+ma_carte <- ma_carte %>%
+  addHeatmap(
+    data      = Heat_REQ,
+    lng       = ~long,
+    lat       = ~lat,
+    intensity = ~Poids,
+    blur      = 15,   
+    max       = 0.1,  
+    radius    = 10,   
+    group     = "Nuage de densité (REQ)"
+  )
+```
+
+
+### Panel de contrôle et légendes
+
+```{r}
+# Panel de contrôle en haut à droite
+ma_carte <- ma_carte %>%
+  addLayersControl(
+    baseGroups = c("Non-membre (REQ)", "Nuage de densité (REQ)"),
+    overlayGroups = c(categories, "Non-membre"),
+    options = layersControlOptions(collapsed = FALSE, position = "topright")
+  )
+
+# Panneau de légende en bas à droite
+ma_carte <- ma_carte %>%
+  addLegend(
+    position = "bottomright",
+    pal = pal_categorie,
+    values = Rep_Entreprises_Membres$CategorieMembre,
+    title = "Catégorie de membre"
+  )
+
+
+# Panneau de légende des MRC en bas à gauche
+ma_carte <- ma_carte %>%
+  addLegend(
+    position = "bottomleft",
+    pal = pal_poly,
+    values = mrc_mauricie$MRS_NM_MRC,
+    title = "Municipalités et MRC"
+  )
+
+# Légende des formes selon la source
+legend_formes <- sprintf(
+  "<b>Forme selon la source</b><br>
+  <span><img src='data:image/svg+xml;utf8,%s' width='18' height='18' style='margin-right:5px;'/> Membre du Pôle</span><br>
+  <span><img src='data:image/svg+xml;utf8,%s' width='18' height='18' style='margin-right:5px;'/> Répertoire</span><br>
+  <span><img src='data:image/svg+xml;utf8,%s' width='18' height='18' style='margin-right:5px;'/> Registre (REQ)</span>",
+  URLencode(svg_circle("white", "black", 2, 16)),
+  URLencode(svg_triangle("white", "black", 2, 16)),
+  URLencode(svg_square("white", "black", 2, 16))
+)
+
+# Ajout de la légende des formes à la carte
+ma_carte <- ma_carte %>%
+  addControl(
+    html = legend_formes,
+    position = "bottomright"
+  )
+
+# Affichage de la carte
+ma_carte
+```
+
+
+
+# Données 
+
+::: {.card height=20%}
+Vous trouverez ici les données chargées utilisées pour la création de la carte.
+
+La méthodologie complète de traitement et de préparation des données est disponible à l’adresse suivante : [goneau.com/és-données](https://goneau.com/és-données). Ce document détaille l’ensemble des étapes appliquées aux jeux de données fournis par le Pôle d’économie sociale de la Mauricie, incluant le tri, le nettoyage et l’uniformisation des informations ainsi que des données tirés du Registraire des entreprises du Québec (REQ).
+:::
+
+
+## Column {.tabset}
+### Liste de membres et répertoire du Pôle
+
+```{r}
+library(DT)
+datatable(Rep_Entreprises_Membres)
+```
+
+### Registre des entreprises du Québec (REQ)
+
+```{r}
+datatable(Entreprises_REQ)
+```

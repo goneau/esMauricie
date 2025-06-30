@@ -1,0 +1,155 @@
+---
+title: "Les données du Registre des entreprises du Québec"
+---
+
+```{r, echo=FALSE, output=FALSE}
+library(tidyverse)
+library(readr)
+```
+
+Les données du @registredesentreprisesRegistreEntreprisesDonnees2025 ont été récupéré le 7&nbsp;juin&nbsp;2025. Nous exploitons seulement `Entreprise.csv` et `Nom.csv`, puisque les données d’intérêts pour la cartographie se retrouvent dans ces deux regroupements de données.
+
+Pour sélectionner la liste des municipalités de la Mauricie, nous utilisons le @RepertoireMunicipalitesQuebec. `MUN.csv` fournit l’inventaire complet des municipalités et de leur caractéristique administrative. Ce document a été sélectionné pour créer la liste de filtrage utilisé pour sélectionner les entreprises situé dans la zone administrative de la Mauricie.
+
+## Importation et sélection des données
+
+Chargement des données du REQ et de la liste des municipalités de la Mauricie.
+
+```{r, output=FALSE}
+# Chemin d'accès pour les données du REQ
+req_path <- "../data/REQ"
+
+# Chargement des données du registre d'entreprise du Québec (REQ)
+Entreprise <- read_csv(file.path(req_path, "Entreprise.csv"),
+   col_types = cols(
+    .default = col_guess()
+  )
+)
+
+# Chargement de la table Nom du registre d'entreprise du Québec (REQ)
+Nom <- read_csv(file.path(req_path, "Nom.csv")) %>%
+  # Sélection des noms en vigueur seulement
+  filter(STAT_NOM == "V") %>%  
+  filter(TYP_NOM_ASSUJ == "N")
+
+# Chargement de la liste des municipalités de la Mauricie (04)
+mun_04 <- read_csv("../data/MUN.csv") %>%
+  filter(regadm == "Mauricie (04)") %>%
+  pull(munnom)
+```
+
+### Préparation des motifs de recherche
+
+```{r, output=FALSE}
+# Chargement de la librairie stringi pour la normalisation des chaînes de caractères
+# Nettoyage des noms de municipalités
+mun_04 <- stringi::stri_trans_general(mun_04, "Latin-ASCII")
+mun_04 <- tolower(mun_04)
+
+# Création du motif pour la recherche des municipalités de la Mauricie
+motif_04 <- paste(mun_04, collapse = "|")
+```
+
+
+```{r}
+# Malgré la normalisation, certaines municipalités contiennent des variations comme "saint-narcisse" ou "saint-tite", etc.
+# Liste des municipalités à exclure
+exlusions <- c(
+  "montreal", # une entreprise de Montréal situé sur la rue Champlain capturée par erreur
+  "saint-barnabe-sud",
+  "saint-narcisse-de-beaurivage",
+  "saint-narcisse-de-rimouski",
+  "saint-stanislas-de-kostka", 
+  "saint-tite-des-caps"
+)
+
+# Création d'un motif d'exclusion pour les municipalités hors zone de la Mauricie
+motif_exclusion <- paste(exlusions, collapse = "|")
+```
+
+
+### Filtrage des entreprises actives de la Mauricie
+
+```{r}
+# Filtrage des entreprises selon les critères spécifiés
+# Entreprises immatriculées
+# Et formes juridiques éligibles au statut d'entreprise d'économie sociale
+Entreprise <- Entreprise %>%
+  filter(COD_STAT_IMMAT == "IM") %>%
+  filter(COD_FORME_JURI %in% c("COP", "PMSBL", "ASS", "SMU", "APE")) 
+  # Note : APE fu ajouté pour inclure les associations personnifiées
+
+# Nettoyage des adresses pour faciliter la recherche
+# des entreprises de la Mauricie
+Entreprise <- Entreprise %>%
+  mutate(  # Création d'une colonne temporaire pour l'adresse
+    adresse_temp = paste(ADR_DOMCL_LIGN2_ADR, ADR_DOMCL_LIGN3_ADR, sep = " ")
+  ) %>%
+  mutate(  # Nettoyage de l'adresse temporaire
+    adresse_temp = stringi::stri_trans_general(adresse_temp, "Latin-ASCII"),
+    adresse_temp = tolower(adresse_temp),
+    adresse_temp = str_replace_all(adresse_temp, "(?i)st(e)?[ -]", "saint\\1-")
+  )
+
+# Sélection des entreprises situées dans les municipalités de la Mauricie
+# et exclusion des municipalités non pertinentes
+Entreprise <- Entreprise %>%  # Formes juridiques spécifiques
+  filter(str_detect(adresse_temp, motif_04)) %>%
+  filter(!str_detect(adresse_temp, motif_exclusion)) %>%
+  select(-adresse_temp)  # Suppression de la colonne temporaire
+```
+
+
+### Jointure d'association des noms d'entreprises
+
+```{r}
+# Jointure entre les tables Entreprise et Nom par le NEQ
+Entreprise <- Entreprise %>%
+  left_join(Nom, by = c("NEQ" = "NEQ"))
+```
+
+### Sélection des colonnes pertinentes
+
+```{r}
+# Visualisation des noms de colonnes
+names(Entreprise)
+
+# Réorganisation et sélection des colonnes pertinentes
+Entreprise <- Entreprise %>%
+  select(
+    NEQ,
+    NomEntreprise = NOM_ASSUJ,
+    Adresse = ADR_DOMCL_LIGN1_ADR ,
+    Municipalite = ADR_DOMCL_LIGN2_ADR ,
+    Adresse_Lign3 = ADR_DOMCL_LIGN3_ADR,
+    CodePostal = ADR_DOMCL_LIGN4_ADR,
+    SecteurActivite = DESC_ACT_ECON_ASSUJ,
+    FormeJuridique = COD_FORME_JURI
+  )
+```
+
+## Géocodage des données
+
+Avant de procéder au géocodage, nous vérifions si les données ont déjà été traitées pour éviter de refaire le travail inutilement. Si le fichier de géocodage existe, on le charge ; sinon, on procède au géocodage.
+
+```{r}
+library(tidygeocoder)
+
+if (file.exists(file.path(req_path, "Entreprise_LatLong.csv"))) {
+  message("Données déjà traitées!")
+  Entreprise_LatLong <- read_csv(file.path(req_path, "Entreprise_LatLong.csv"))
+} else {
+  message("Données pas encore traitées!")
+  Entreprise_LatLong <- Entreprise %>%
+  mutate(AdresseTemp = paste(Adresse, Municipalite, Adresse_Lign3, CodePostal, sep = " ")) %>%
+  geocode(
+    address = AdresseTemp,
+    method = "mapbox",
+    lat = "lat",
+    long = "long",
+    limit = 1
+  ) %>%
+  select(-AdresseTemp)
+  write.csv(Entreprise_LatLong, file.path(req_path, "Entreprise_LatLong.csv"), row.names = FALSE)
+}
+```
