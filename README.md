@@ -19,23 +19,3 @@ Pour soutenir cette croissance, il est essentiel d’orienter stratégiquement l
 | Répertoire des municipalités du Québec     | CSV : inventaire complet des municipalités                    |
 
 
-## Structure du dépôt 
-
-├── data/                       # Jeux de données bruts
-│   ├── Pôle/                   # Données internes du Pôle d’économie sociale
-│   ├── REQ/                    # Fichiers du Registre des entreprises du Québec
-│   ├── SHP/                    # Shapefiles (limites administratives)
-│   └── MUN.csv                 # Inventaire des municipalités
-├── site_dashboard/             # Code du dashboard interactif
-│   ├── images/                 # Images pour le dashboard
-│   ├── index.qmd               # Quarto source du dashboard
-│   └── styles.css              # Styles personnalisés
-├── site_data/                  # Site statique de présentation des données
-│   ├── images/                 # Visuels et cartes pour le site de données
-│   ├── _quarto.yml             # Configuration Quarto du site de données
-│   ├── index.qmd               # Page d’accueil du site de données
-│   ├── pole.qmd                # Traitement des données du Pôle d’économie sociale
-│   ├── req.qmd                 # Traitement des données du Registre des entreprises
-│   ├── references.qmd          # Bibliographie et références
-│   └── styles.css              # Styles personnalisés
-└── references.bib 				# Fichier BibTeX pour la bibliographie
